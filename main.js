@@ -6,17 +6,22 @@ const H = canvas.height;
 const GROUND_Y = H - 90;
 
 const GRAVITY = 1900;
-const BODY_LEN = 120;
+const TORSO_LEN = 92;
+const THIGH_LEN = 66;
+const CALF_LEN = 60;
 const HEAD_R = 24;
 const FOOT_R = 14;
 const DT_MAX = 1 / 30;
 const RIGID_SOLVE_ITERS = 2;
-const ARM_BASE_FACTOR = 0.72;
+const ARM_BASE_FACTOR = 0.4;
 const CHARGE_MAX = 0.5;
-const BODY_BEND_MAX = 34;
-const RELEASE_BASE = 160;
-const RELEASE_GAIN = 620;
-const RELEASE_TWIST = 220;
+const KNEE_FOLD_ANGLE = 1.18;
+const LEG_BEND_SPEED = 13;
+const LEG_BEND_REST = 0.78;
+const CHARGE_RELEASE_SPEED = 4;
+const LEG_THRUST_BASE = 1100;
+const LEG_THRUST_GAIN = 3200;
+const LEG_TWIST = 980;
 const WIN_SCORE = 5;
 const ROUND_RESET_DELAY_MS = 700;
 
@@ -32,7 +37,7 @@ const state = {
 function makePlayer(x, color, controls) {
   return {
     x,
-    y: GROUND_Y - BODY_LEN / 2,
+    y: GROUND_Y - (TORSO_LEN * 0.5 + THIGH_LEN + CALF_LEN),
     vx: 0,
     vy: 0,
     angle: (Math.random() - 0.5) * 0.3,
@@ -42,7 +47,8 @@ function makePlayer(x, color, controls) {
     score: 0,
     charging: false,
     chargeTime: 0,
-    bend: 0
+    legBend: LEG_BEND_REST,
+    legSide: controls === 'KeyA' ? -1 : 1
   };
 }
 
@@ -65,8 +71,8 @@ function resetPositionsKeepScore() {
   const p2 = state.players[1];
   p1.x = W * 0.38;
   p2.x = W * 0.62;
-  p1.y = GROUND_Y - BODY_LEN / 2;
-  p2.y = GROUND_Y - BODY_LEN / 2;
+  p1.y = GROUND_Y - (TORSO_LEN * 0.5 + THIGH_LEN + CALF_LEN);
+  p2.y = GROUND_Y - (TORSO_LEN * 0.5 + THIGH_LEN + CALF_LEN);
   p1.vx = 0;
   p1.vy = 0;
   p2.vx = 0;
@@ -79,8 +85,8 @@ function resetPositionsKeepScore() {
   p2.charging = false;
   p1.chargeTime = 0;
   p2.chargeTime = 0;
-  p1.bend = 0;
-  p2.bend = 0;
+  p1.legBend = LEG_BEND_REST;
+  p2.legBend = LEG_BEND_REST;
   state.baseRigidLength = Math.hypot(p2.x - p1.x, p2.y - p1.y) * ARM_BASE_FACTOR;
   state.rigidLength = state.baseRigidLength;
   state.running = true;
@@ -91,17 +97,37 @@ function resetPositionsKeepScore() {
 function getPoints(p) {
   const ax = Math.sin(p.angle);
   const ay = -Math.cos(p.angle);
-  const bodyLen = BODY_LEN - BODY_BEND_MAX * p.bend;
-  const halfBody = bodyLen * 0.5;
+  const halfTorso = TORSO_LEN * 0.5;
+  const butt = {
+    x: p.x - ax * halfTorso,
+    y: p.y - ay * halfTorso
+  };
+  // Legs are driven by gravity direction, not torso direction.
+  const straightX = 0;
+  const straightY = 1;
+  const halfFold = KNEE_FOLD_ANGLE * p.legBend * p.legSide * 0.5;
+  const c1 = Math.cos(halfFold);
+  const s1 = Math.sin(halfFold);
+  const c2 = Math.cos(-halfFold);
+  const s2 = Math.sin(-halfFold);
+  const thighX = straightX * c1 - straightY * s1;
+  const thighY = straightX * s1 + straightY * c1;
+  const calfX = straightX * c2 - straightY * s2;
+  const calfY = straightX * s2 + straightY * c2;
 
   const head = {
-    x: p.x + ax * (halfBody + HEAD_R * 0.4),
-    y: p.y + ay * (halfBody + HEAD_R * 0.4)
+    x: p.x + ax * (halfTorso + HEAD_R * 0.4),
+    y: p.y + ay * (halfTorso + HEAD_R * 0.4)
+  };
+
+  const knee = {
+    x: butt.x + thighX * THIGH_LEN,
+    y: butt.y + thighY * THIGH_LEN
   };
 
   const foot = {
-    x: p.x - ax * halfBody,
-    y: p.y - ay * halfBody
+    x: knee.x + calfX * CALF_LEN,
+    y: knee.y + calfY * CALF_LEN
   };
 
   const hand = {
@@ -109,7 +135,7 @@ function getPoints(p) {
     y: p.y + ay * 12
   };
 
-  return { head, foot, hand, axis: { x: ax, y: ay } };
+  return { head, butt, knee, foot, hand, axis: { x: ax, y: ay } };
 }
 
 function startCharge(i) {
@@ -124,19 +150,7 @@ function releaseCharge(i) {
   if (!state.running) return;
   const p = state.players[i];
   if (!p.charging) return;
-
-  const charge01 = Math.min(p.chargeTime / CHARGE_MAX, 1);
-  const axis = getPoints(p).axis;
-  const tx = -axis.y;
-  const ty = axis.x;
-  const twistDir = i === 0 ? 1 : -1;
-  const kick = RELEASE_BASE + RELEASE_GAIN * charge01;
-  const twist = RELEASE_TWIST * (0.6 + 0.4 * charge01);
-
-  p.vx += axis.x * kick + tx * twist * twistDir;
-  p.vy += axis.y * kick + ty * twist * twistDir;
   p.charging = false;
-  p.chargeTime = 0;
 }
 
 function solveRigidPair() {
@@ -198,10 +212,17 @@ window.addEventListener('keyup', (e) => {
 });
 
 function physics(dt) {
-  for (const p of state.players) {
-    if (p.charging) p.chargeTime = Math.min(CHARGE_MAX, p.chargeTime + dt);
+  for (let i = 0; i < state.players.length; i += 1) {
+    const p = state.players[i];
+    if (p.charging) {
+      p.chargeTime = Math.min(CHARGE_MAX, p.chargeTime + dt);
+    } else {
+      p.chargeTime = Math.max(0, p.chargeTime - CHARGE_RELEASE_SPEED * dt);
+    }
     const charge01 = Math.min(p.chargeTime / CHARGE_MAX, 1);
-    p.bend = charge01;
+    const bendTarget = p.charging ? LEG_BEND_REST * (1 - charge01) : LEG_BEND_REST;
+    const bendRate = Math.min(1, LEG_BEND_SPEED * dt);
+    p.legBend += (bendTarget - p.legBend) * bendRate;
     p.grounded = false;
     p.vy += GRAVITY * dt;
     p.x += p.vx * dt;
@@ -221,11 +242,25 @@ function physics(dt) {
       p.grounded = true;
     }
 
+    if (p.grounded && p.charging && charge01 > 0) {
+      const axis = pts.axis;
+      const tx = -axis.y;
+      const ty = axis.x;
+      const twistDir = i === 0 ? 1 : -1;
+      const thrust = LEG_THRUST_BASE + LEG_THRUST_GAIN * charge01;
+      const twist = LEG_TWIST * (0.5 + 0.5 * charge01);
+      const impulseDt = dt * 4;
+
+      p.vx += (axis.x * thrust + tx * twist * twistDir) * impulseDt;
+      p.vy += (axis.y * thrust + ty * twist * twistDir) * impulseDt;
+      p.grounded = false;
+    }
+
     const headPen = pts.head.y + HEAD_R - GROUND_Y;
     const headHitWall = pts.head.x - HEAD_R < 0 || pts.head.x + HEAD_R > W;
     if (state.running && (headPen > 0 || headHitWall)) {
       state.running = false;
-      state.winner = p === state.players[0] ? 2 : 1;·
+      state.winner = p === state.players[0] ? 2 : 1;
       const winner = state.players[state.winner - 1];
       winner.score += 1;
       if (winner.score < WIN_SCORE) {
@@ -261,6 +296,8 @@ function drawPlayer(p) {
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(pts.foot.x, pts.foot.y);
+  ctx.lineTo(pts.knee.x, pts.knee.y);
+  ctx.lineTo(pts.butt.x, pts.butt.y);
   ctx.lineTo(pts.head.x, pts.head.y);
   ctx.stroke();
 
@@ -272,6 +309,15 @@ function drawPlayer(p) {
   ctx.fillStyle = '#111';
   ctx.beginPath();
   ctx.arc(pts.foot.x, pts.foot.y, FOOT_R, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath();
+  ctx.arc(pts.knee.x, pts.knee.y, 7, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(pts.butt.x, pts.butt.y, 8, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = '#fff';
