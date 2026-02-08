@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wrestle Jump</title>
+    <style>
+      :root {
+        --bg-1: #f7f2d8;
+        --bg-2: #d7f0e8;
+        --line: #222;
+        --p1: #d94848;
+        --p2: #2c78d8;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+        background: radial-gradient(circle at 20% 20%, var(--bg-1), transparent 40%),
+          radial-gradient(circle at 80% 10%, #fbe3e3, transparent 38%),
+          linear-gradient(160deg, #f3f9ff, var(--bg-2));
+        display: grid;
+        place-items: center;
+        padding: 16px;
+      }
+
+      .wrap {
+        width: min(980px, 100%);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: clamp(24px, 3vw, 38px);
+        letter-spacing: 1px;
+        color: #111;
+      }
+
+      .help {
+        margin: 0 0 12px;
+        color: #333;
+        font-size: 15px;
+      }
+
+      canvas {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        border: 3px solid var(--line);
+        border-radius: 14px;
+        background: linear-gradient(#ffffff, #ecfff4);
+        box-shadow: 0 20px 45px rgba(0, 0, 0, 0.15);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Wrestle Jump</h1>
+      <p class="help">玩家1: <b>A</b> 跳跃 | 玩家2: <b>L</b> 跳跃 | 头碰地面即输 | <b>R</b> 重新开始</p>
+      <canvas id="game" width="1280" height="720"></canvas>
+    </div>
+    <script src="main.js"></script>
+  </body>
+</html>
